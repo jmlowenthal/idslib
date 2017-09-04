@@ -17,14 +17,22 @@ bool IDSVideoCapture::open(int _index) {
 
 	HIDS index = _index;
 
+	// Release any existing resources.
 	release();
 
+	// Ask API to open camera.
 	if (is_InitCamera(&index, NULL) == IS_SUCCESS) {
 		
+		// If success set the camera ID field and fetch camera and sensor info 
 		m_CamId = index;
 		is_GetCameraInfo(m_CamId, &m_CameraInfo);
 		is_GetSensorInfo(m_CamId, &m_SensorInfo);
+		
+		// Use maximum dimensions
+		m_Width = m_SensorInfo.nMaxWidth;
+		m_Height = m_SensorInfo.nMaxHeight;
 
+		// Allocate memory for API to load frames into
 		for (int i = 0; i < NUM_BUFFERS; ++i) {
 			is_AllocImageMem(
 				m_CamId,
@@ -41,12 +49,11 @@ bool IDSVideoCapture::open(int _index) {
 			);
 		}
 
-		m_Width = m_SensorInfo.nMaxWidth;
-		m_Height = m_SensorInfo.nMaxHeight;
-
+		// Tell API to load frames into memory and set the format
 		is_SetDisplayMode(m_CamId, IS_SET_DM_DIB);
 		is_SetColorMode(m_CamId, IS_CM_BGR8_PACKED);
 
+		// Initialise start time and start the camera running
 		m_StartTime = time(NULL);
 		is_CaptureVideo(m_CamId, IS_DONT_WAIT);
 
@@ -59,8 +66,10 @@ bool IDSVideoCapture::open(int _index) {
 void IDSVideoCapture::release() {
 	if (isOpened()) {
 		
+		// Stop the camera
 		is_StopLiveVideo(m_CamId, IS_FORCE_VIDEO_STOP);
 		
+		// Release memory
 		is_ClearSequence(m_CamId);
 		for (int i = 0; i < NUM_BUFFERS; ++i) {
 			if (m_ImageMemoryAddr[i] != nullptr) {
@@ -68,8 +77,10 @@ void IDSVideoCapture::release() {
 			}
 		}
 		
+		// Close the camera handle
 		is_ExitCamera(m_CamId);
 		m_CamId = 0;
+
 	}
 }
 
@@ -80,10 +91,13 @@ bool IDSVideoCapture::isOpened() const {
 bool IDSVideoCapture::grab() {
 	if (isOpened()) {
 
+		// Unlock image memory to allow the API to write to the previously
+		// locked buffer
 		if (m_LockedMemory != nullptr) {
 			is_UnlockSeqBuf(m_CamId, IS_IGNORE_PARAMETER, m_LockedMemory);
 		}
 
+		// Grab the last (and not current) image buffer
 		is_GetActSeqBuf(m_CamId, NULL, NULL, &m_LockedMemory);
 		is_LockSeqBuf(m_CamId, IS_IGNORE_PARAMETER, m_LockedMemory);
 
@@ -97,9 +111,9 @@ bool IDSVideoCapture::grab() {
 
 bool IDSVideoCapture::retrieve(OutputArray image, int flag) {
 	if (isOpened()) {
-		Mat ref(m_Height, m_Width, CV_8UC3, (void*)m_LockedMemory);
+		// Initialise Mat using locked memory and then duplicate into output
+		cv::Mat ref(m_Height, m_Width, CV_8UC3, (void*)m_LockedMemory);
 		ref.copyTo(image);
-
 		return true;
 	}
 	else {
